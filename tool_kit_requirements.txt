@@ -1,0 +1,2 @@
+sentry-sdk==1.5.1
+SQLAlchemy==1.4.28
