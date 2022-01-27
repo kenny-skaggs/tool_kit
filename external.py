@@ -1,6 +1,5 @@
 import atexit
 from contextlib import contextmanager
-from enum import Enum
 import logging
 import os
 from typing import Optional
@@ -11,25 +10,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 
-class Environment(Enum):
-    PROD = 1
-    DEV = 2
-
-
-CURRENT_ENV = Environment.DEV
-
-
 class ErrorTracking:
     @classmethod
     def initialize(cls):
-        if CURRENT_ENV == Environment.PROD:
-            sentry_dsn = os.environ.get('SENTRY_DSN')
-            if sentry_dsn:
-                sentry_sdk.init(sentry_dsn)
-            else:
-                raise Exception('Unable to load DSN')
+        sentry_dsn = os.environ.get('SENTRY_DSN')
+        if sentry_dsn:
+            sentry_sdk.init(sentry_dsn)
         else:
-            logging.warning('Skipping error tracking service')
+            raise Exception('Unable to load DSN')
 
 
 class Database:
@@ -39,6 +27,7 @@ class Database:
 
             instance.engine = None
             instance.session_factory = None
+            instance._use_ssl_tunnel = kwargs.get('use_ssl_tunnel', False)
             instance._init_connection()
 
             cls._instance = instance
@@ -65,7 +54,7 @@ class Database:
             raise Exception('Database name not set')
 
         db_connection_port = 5432
-        if CURRENT_ENV == Environment.DEV:
+        if self._use_ssl_tunnel:
             tunnel = SshTunnelFactory().start_tunnel()
             db_connection_port = tunnel.local_bind_port
 
@@ -103,3 +92,9 @@ class SshTunnelFactory:
         atexit.register(self.close_ssh_tunnel)
 
         return self.ssh_tunnel
+
+
+class Environment:
+    @classmethod
+    def is_dev(cls) -> bool:
+        return bool(os.environ.get('IS_DEV', False))
