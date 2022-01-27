@@ -20,19 +20,25 @@ class ErrorTracking:
             raise Exception('Unable to load DSN')
 
 
-class Database:
-    def __new__(cls, *args, **kwargs):
-        if not hasattr(cls, '_instance'):
-            instance = super(Database, cls).__new__(cls)
+class DatabaseConnection:
+    def __init__(
+            self,
+            username: str = os.environ['DB_USERNAME'],
+            password: str = os.environ['DB_PASSWORD'],
+            database_name: str = os.environ['DB_NAME'],
+            port: int = os.environ.get('DB_PORT'),
+            ssl_tunnel: 'SshTunnel' = None
+    ):
+        self.engine = None
+        self.session_factory = None
 
-            instance.engine = None
-            instance.session_factory = None
-            instance._use_ssl_tunnel = kwargs.get('use_ssl_tunnel', False)
-            instance._init_connection()
-
-            cls._instance = instance
-
-        return getattr(cls, '_instance')
+        self._init_connection(
+            db_user=username,
+            db_password=password,
+            db_name=database_name,
+            port=port,
+            ssl_tunnel=ssl_tunnel
+        )
 
     @contextmanager
     def get_new_session(self):
@@ -43,55 +49,56 @@ class Database:
         finally:
             session.close()
 
-    def _init_connection(self) -> (sessionmaker, None):
-        db_user = os.environ.get('DB_USERNAME')
-        db_password = os.environ.get('DB_PASSWORD')
-        if not (db_user and db_password):
-            raise Exception('Database credentials not set')
+    def _init_connection(self, db_user, db_password, db_name, port, ssl_tunnel) -> (sessionmaker, None):
+        if not port and not ssl_tunnel:
+            raise Exception('We need either a port or an ssl tunnel to connect to.')
 
-        db_name = os.environ.get('DB_NAME')
-        if not db_name:
-            raise Exception('Database name not set')
+        if ssl_tunnel:
+            port = ssl_tunnel.get_entrance_port()
 
-        db_connection_port = 5432
-        if self._use_ssl_tunnel:
-            tunnel = SshTunnelFactory().start_tunnel()
-            db_connection_port = tunnel.local_bind_port
-
-        self.engine = create_engine(f'postgresql://{db_user}:{db_password}@localhost:{db_connection_port}/{db_name}')
+        self.engine = create_engine(f'postgresql://{db_user}:{db_password}@localhost:{port}/{db_name}')
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
 
-class SshTunnelFactory:
-    def __init__(self):
-        self.remote_host = '127.0.0.1'
-        self.remote_port = 5432
-        self.ssh_host = os.environ.get('SSH_HOST')
-        self.ssh_port = 22
-        self.ssh_username = os.environ.get('SSH_USERNAME')
-        self.ssh_pem_file = os.environ.get('SSH_KEY_FILE')
-        if not (self.ssh_host and self.ssh_username and self.ssh_pem_file):
-            raise Exception('SSH credentials not set')
+class SshTunnel:
+    def __init__(
+            self,
+            proxy_target_port,
+            host=os.environ['SSH_HOST'],
+            username=os.environ['SSH_USERNAME'],
+            key_file_path=os.environ['SSH_KEY_FILE'],
+            remote_host='127.0.0.1'
+    ):
+        self._remote_host = remote_host
+        self._remote_port = proxy_target_port
+        self._ssh_host = host
+        self._ssh_port = 22
+        self._ssh_username = username
+        self._key_file_path = key_file_path
 
-        self.ssh_tunnel: Optional[SSHTunnelForwarder] = None
+        self._tunneler: Optional[SSHTunnelForwarder] = None
 
     def close_ssh_tunnel(self):
-        if self.ssh_tunnel:
+        if self._tunneler:
             logging.info('Closing ssh tunnel')
-            self.ssh_tunnel.stop()
-            self.ssh_tunnel = None
+            self._tunneler.stop()
+            self._tunneler = None
 
-    def start_tunnel(self):
-        self.ssh_tunnel = SSHTunnelForwarder(
-            ssh_address_or_host=(self.ssh_host, self.ssh_port),
-            ssh_username=self.ssh_username,
-            ssh_pkey=self.ssh_pem_file,
-            remote_bind_address=(self.remote_host, self.remote_port)
-        )
-        self.ssh_tunnel.start()
-        atexit.register(self.close_ssh_tunnel)
+    def get_entrance_port(self):
+        """
+        Starts the tunnel if it's not already started, and returns the local port to connect to for the proxy/tunnel
+        """
+        if not self._tunneler:
+            self._tunneler = SSHTunnelForwarder(
+                ssh_address_or_host=(self._ssh_host, self._ssh_port),
+                ssh_username=self._ssh_username,
+                ssh_pkey=self._key_file_path,
+                remote_bind_address=(self._remote_host, self._remote_port)
+            )
+            self._tunneler.start()
+            atexit.register(self.close_ssh_tunnel)
 
-        return self.ssh_tunnel
+        return self._tunneler.ssh_port
 
 
 class Environment:
