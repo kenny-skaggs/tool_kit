@@ -23,6 +23,7 @@ class ErrorTracking:
 class DatabaseConnection:
     def __init__(
             self,
+            host: str = 'localhost',
             username: str = os.environ['DB_USERNAME'],
             password: str = os.environ['DB_PASSWORD'],
             database_name: str = os.environ['DB_NAME'],
@@ -34,6 +35,7 @@ class DatabaseConnection:
         self.session_factory = None
 
         self._init_connection(
+            host=host,
             db_user=username,
             db_password=password,
             db_name=database_name,
@@ -52,7 +54,7 @@ class DatabaseConnection:
             session.close()
 
     def _init_connection(
-            self, db_user, db_password, db_name, port, ssl_tunnel, db_protocol
+            self, host, db_user, db_password, db_name, port, ssl_tunnel, db_protocol
     ) -> (sessionmaker, None):
         if not port and not ssl_tunnel:
             raise Exception('We need either a port or an ssl tunnel to connect to.')
@@ -60,7 +62,7 @@ class DatabaseConnection:
         if ssl_tunnel:
             port = ssl_tunnel.get_entrance_port()
 
-        self.engine = create_engine(f'{db_protocol}://{db_user}:{db_password}@localhost:{port}/{db_name}')
+        self.engine = create_engine(f'{db_protocol}://{db_user}:{db_password}@{host}:{port}/{db_name}')
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
 
