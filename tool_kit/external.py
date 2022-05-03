@@ -27,7 +27,8 @@ class DatabaseConnection:
             password: str = os.environ['DB_PASSWORD'],
             database_name: str = os.environ['DB_NAME'],
             port: int = os.environ.get('DB_PORT'),
-            ssl_tunnel: 'SshTunnel' = None
+            ssl_tunnel: 'SshTunnel' = None,
+            db_protocol: str = 'postgresql'
     ):
         self.engine = None
         self.session_factory = None
@@ -37,7 +38,8 @@ class DatabaseConnection:
             db_password=password,
             db_name=database_name,
             port=port,
-            ssl_tunnel=ssl_tunnel
+            ssl_tunnel=ssl_tunnel,
+            db_protocol=db_protocol
         )
 
     @contextmanager
@@ -49,14 +51,16 @@ class DatabaseConnection:
         finally:
             session.close()
 
-    def _init_connection(self, db_user, db_password, db_name, port, ssl_tunnel) -> (sessionmaker, None):
+    def _init_connection(
+            self, db_user, db_password, db_name, port, ssl_tunnel, db_protocol
+    ) -> (sessionmaker, None):
         if not port and not ssl_tunnel:
             raise Exception('We need either a port or an ssl tunnel to connect to.')
 
         if ssl_tunnel:
             port = ssl_tunnel.get_entrance_port()
 
-        self.engine = create_engine(f'postgresql://{db_user}:{db_password}@localhost:{port}/{db_name}')
+        self.engine = create_engine(f'{db_protocol}://{db_user}:{db_password}@localhost:{port}/{db_name}')
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
 
@@ -66,15 +70,18 @@ class SshTunnel:
             proxy_target_port,
             host=os.environ['SSH_HOST'],
             username=os.environ['SSH_USERNAME'],
-            key_file_path=os.environ['SSH_KEY_FILE'],
+            key_file_path=os.environ.get('SSH_KEY_FILE'),
+            password=os.environ.get('SSH_PASSWORD'),
             remote_host='127.0.0.1'
     ):
         self._remote_host = remote_host
         self._remote_port = proxy_target_port
         self._ssh_host = host
         self._ssh_port = 22
+
         self._ssh_username = username
         self._key_file_path = key_file_path
+        self._password = password
 
         self._tunneler: Optional[SSHTunnelForwarder] = None
 
@@ -89,12 +96,17 @@ class SshTunnel:
         Starts the tunnel if it's not already started, and returns the local port to connect to for the proxy/tunnel
         """
         if not self._tunneler:
-            self._tunneler = SSHTunnelForwarder(
-                ssh_address_or_host=(self._ssh_host, self._ssh_port),
-                ssh_username=self._ssh_username,
-                ssh_pkey=self._key_file_path,
-                remote_bind_address=(self._remote_host, self._remote_port)
-            )
+            parameters = {
+                'ssh_address_or_host': (self._ssh_host, self._ssh_port),
+                'ssh_username': self._ssh_username,
+                'remote_bind_address': (self._remote_host, self._remote_port)
+            }
+            if self._key_file_path:
+                parameters['ssh_pkey'] = self._key_file_path
+            else:
+                parameters['ssh_password'] = self._password
+
+            self._tunneler = SSHTunnelForwarder(**parameters)
             self._tunneler.start()
             atexit.register(self.close_ssh_tunnel)
 

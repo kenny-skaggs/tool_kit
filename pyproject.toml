@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tool_kit"
-version = "0.2.0"
+version = "0.3.0"
 description = "generally useful components"
 authors = ["Your Name <you@example.com>"]
 
