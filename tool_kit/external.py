@@ -2,7 +2,7 @@ import atexit
 from contextlib import contextmanager
 import logging
 import os
-from typing import Optional
+from typing import List, Optional
 
 import sentry_sdk
 from sshtunnel import SSHTunnelForwarder
@@ -12,10 +12,13 @@ from sqlalchemy.orm import sessionmaker
 
 class ErrorTracking:
     @classmethod
-    def initialize(cls):
+    def initialize(cls, integrations: List = None):
         sentry_dsn = os.environ.get('SENTRY_DSN')
         if sentry_dsn:
-            sentry_sdk.init(sentry_dsn)
+            kwargs = {}
+            if integrations:
+                kwargs['integrations'] = [integrations]
+            sentry_sdk.init(sentry_dsn, **kwargs)
         else:
             raise Exception('Unable to load DSN')
 
