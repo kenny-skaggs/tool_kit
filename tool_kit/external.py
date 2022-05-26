@@ -32,10 +32,12 @@ class DatabaseConnection:
             database_name: str = os.environ['DB_NAME'],
             port: int = os.environ.get('DB_PORT'),
             ssl_tunnel: 'SshTunnel' = None,
-            db_protocol: str = 'postgresql'
+            db_protocol: str = 'postgresql',
+            db_url: str = os.environ.get('DB_URL')
     ):
         self.engine = None
         self.session_factory = None
+        self._db_url = db_url
 
         self._init_connection(
             host=host,
@@ -65,7 +67,10 @@ class DatabaseConnection:
         if ssl_tunnel:
             port = ssl_tunnel.get_entrance_port()
 
-        self.engine = create_engine(f'{db_protocol}://{db_user}:{db_password}@{host}:{port}/{db_name}')
+        if self._db_url is None:
+            self._db_url = f'{db_protocol}://{db_user}:{db_password}@{host}:{port}/{db_name}'
+
+        self.engine = create_engine(self._db_url)
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
 
